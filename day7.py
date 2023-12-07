@@ -5,6 +5,7 @@ from collections import Counter
 import bisect
 from itertools import combinations_with_replacement
 import functools
+import random
 import time
 
 data = """32T3K 765
@@ -13,13 +14,33 @@ KK677 28
 KTJJT 220
 QQQJA 483"""
 
-data = aocd.get_data(day=7, year=2023)
-if not os.path.exists("day7.txt"):
-    with open("day7.txt", "w") as f:
-        f.write(data)
+start_time = time.time()
+
+#data = aocd.get_data(day=7, year=2023)
+#if not os.path.exists("day7.txt"):
+#    with open("day7.txt", "w") as f:
+#        f.write(data)
+        
+with open("day7_bigboy.txt", "r") as f:
+    data = f.read()
         
 CARD_STRENGTHS = { **{str(i): i for i in range(2, 10)} , **{"T": 10, "J": 11, "Q": 12, "K": 13, "A": 14} }
 INVERSE_CARD_STRENGTHS = {v: k for k, v in CARD_STRENGTHS.items()}
+
+
+def generate_case(nhands):
+    """ Generates a random case with nhands hands.
+    """
+    hands = []
+    for _ in range(nhands):
+        hand = []
+        for _ in range(5):
+            card = random.choice(list(CARD_STRENGTHS.keys()))
+            hand.append(card)
+        bid = random.randint(1, 10000)
+        hands.append((hand, bid))
+    data = "\n".join(["".join(hand) + " " + str(bid) for hand, bid in hands])
+    return data
 
 def hand_evaluation_primary(cards):
     """ Returns the primary evaluation score of a hand.
@@ -97,9 +118,9 @@ class Hand:
     """
     def __init__(self, cards_str, bid=0):
         # Cards are a string "A35T9" so lets separate them to a list
-        print(f"Received cards in string form: {cards_str}")
+        #print(f"Received cards in string form: {cards_str}")
         self.cards = cards_str
-        print(f"Parsed cards: {self.cards}")
+        #print(f"Parsed cards: {self.cards}")
         self.cards = [CARD_STRENGTHS[card] for card in self.cards]
         self.cards_tuple = self.cards
         # Jacks (11) can be substituted for any card
@@ -119,11 +140,14 @@ class Hand:
             if score > highest_score:
                 highest_score = score
                 best_substitution = substitution
+            if score == 7*14:
+                break
         for i,j in enumerate(self.jack_indices):
             self.cards[j] = best_substitution[i]
         self.best_cards = tuple(self.cards)
         self.best_substitution = best_substitution        
         self.primary_score = highest_score
+        self.secondary_score = None#self.calc_secondary_score(is_same_type = True)
         self.bid = bid
     
     def __hash__(self):
@@ -133,7 +157,7 @@ class Hand:
         original_hand = [card if i not in self.jack_indices else 11 for i, card in enumerate(self.cards)]
         return f"Hand: {[INVERSE_CARD_STRENGTHS[card] for card in original_hand]}, bid: {self.bid}"
     
-    @functools.lru_cache(maxsize=128)
+    #@functools.lru_cache(maxsize=128)
     def calc_secondary_score(self,is_same_type = False):
         
         if is_same_type:
@@ -150,8 +174,13 @@ class Hand:
             return False
         # If the primary score is the same
         else:
-            self_sec_score = self.calc_secondary_score(True)
-            other_sec_score = other.calc_secondary_score(True)
+            if self.secondary_score is None:
+                self.secondary_score = self.calc_secondary_score(True)
+            if other.secondary_score is None:
+                other.secondary_score = other.calc_secondary_score(True)
+                
+            self_sec_score = self.secondary_score#calc_secondary_score(True)
+            other_sec_score = other.secondary_score#calc_secondary_score(True)
             if self_sec_score > other_sec_score:
                 return True
             elif self_sec_score < other_sec_score:
@@ -164,8 +193,14 @@ class Hand:
         elif self.primary_score > other.primary_score:
             return False
         else:
-            self_sec_score = self.calc_secondary_score(True)
-            other_sec_score = other.calc_secondary_score(True)
+            if self.secondary_score is None:
+                self.secondary_score = self.calc_secondary_score(True)
+            if other.secondary_score is None:
+                other.secondary_score = other.calc_secondary_score(True)
+                
+            self_sec_score = self.secondary_score
+            other_sec_score = other.secondary_score
+            
             if self_sec_score < other_sec_score:
                 return True
             elif self_sec_score > other_sec_score:
@@ -177,25 +212,27 @@ for line in data.split("\n"):
     hand_data = line.split(" ")
     card_str = hand_data[0]
     bid = int(hand_data[1])
-    print(f"Creating hand with cards {card_str} and bid {bid}")
+    #print(f"Creating hand with cards {card_str} and bid {bid}")
     hand = Hand(card_str, bid)
     # Add to hands, and maintain sorted order
     bisect.insort(hands, hand)
 
-print(hands)
+#print(hands)
 # The rank of the hand is 1, if the hand loses, and len(hands) if the hand is the best hand
 # The win of a hand is rank*bid
 wins = []
 for i, hand in enumerate(hands):
     win = (i+1)*hand.bid
-    print(f"Cards: {hand.cards_tuple}, Best cards: {hand.best_cards}")
-    print(f"Hand primary score: {hand.primary_score}, secondary score: {hand.calc_secondary_score(True)}")
+    #print(f"Cards: {hand.cards_tuple}, Best cards: {hand.best_cards}")
+    #print(f"Hand primary score: {hand.primary_score}, secondary score: {hand.calc_secondary_score(True)}")
     wins.append(win)
-    print()
+    #print()
 ans = sum(wins)
 print(ans)
 
-aocd.submit(ans, day=7, year=2023, part="b")
+print(f"Time taken (gold): {time.time() - start_time:.2f} seconds")
+
+#aocd.submit(ans, day=7, year=2023, part="b")
 
 
     

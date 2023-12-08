@@ -130,7 +130,7 @@ class Hand:
         self.cards_tuple = tuple([c if c != 11 else 1 for c in self.cards])
         highest_score = 0
         best_substitution = None
-        for substitution in combinations_with_replacement(range(2, 15), len(self.jack_indices)):
+        for substitution in combinations_with_replacement(range(14,1,-1), len(self.jack_indices)):
             #print(f"Substituting jacks with {substitution}")
             # Substitute the jacks
             for i, j in enumerate(self.jack_indices):
@@ -165,6 +165,9 @@ class Hand:
         else:
             secondary_score = hand_evaluation_secondary(self.best_cards)
         return secondary_score
+    
+    def full_score(self):
+        return str(self.primary_score) + str(self.calc_secondary_score(True))
             
     
     def __gt__(self, other):
@@ -214,8 +217,10 @@ for line in data.split("\n"):
     bid = int(hand_data[1])
     #print(f"Creating hand with cards {card_str} and bid {bid}")
     hand = Hand(card_str, bid)
+    hands.append(hand)
     # Add to hands, and maintain sorted order
-    bisect.insort(hands, hand)
+    #bisect.insort(hands, hand)
+hands.sort()
 
 #print(hands)
 # The rank of the hand is 1, if the hand loses, and len(hands) if the hand is the best hand

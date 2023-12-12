@@ -1,9 +1,10 @@
+import functools
 import itertools
 import aocd
 import os
-from matplotlib import pyplot as plt
 import numpy as np
 import math
+import tqdm
 
 DAY = 12
 
@@ -27,6 +28,9 @@ SYM_TO_NUM = {
 if not os.path.exists(input_file):
     with open(input_file, "w") as f:
         f.write(data)
+
+#with open(input_file, "r") as f:
+#    data = f.read()
         
 data_strings = data.split("\n")
 
@@ -64,37 +68,11 @@ def count_valid_vectors(vector, blocks):
     """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
     s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
     """   
-    vector = np.array([SYM_TO_NUM[c] for c in vector + "?"])
+    vector = np.array([SYM_TO_NUM[c] for c in vector])# + "?"])
     # Copy the vector and blocks 4 times
-    vector = np.tile(vector, 5)[:-1]
-    blocks = np.tile(blocks, 5)
-    print(vector, blocks)
-    
-    
-    # First, we need to find the indices of the '?'s
-    # Naively, every '?' can be either a '.' or a '#'
-    # So, lets just try all combinations of '.' and '#'
-    # and check if the resulting vector is valid.
-    q_indices = np.where(vector == -1)[0]
-    
-    n_q = len(q_indices)
-    combs = itertools.product([0, 1], repeat=n_q)
-    n_valid = 0
-    for comb in combs:
-        vector[q_indices] = comb
-        if is_valid_vector(vector, blocks):
-            n_valid += 1
-    return n_valid
-
-def count_valid_vectors2(vector, blocks):
-    """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
-    s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
-    """   
-    vector = np.array([SYM_TO_NUM[c] for c in vector + "?"])
-    # Copy the vector and blocks 4 times
-    vector = np.tile(vector, 5)[:-1]
-    blocks = np.tile(blocks, 5)
-    print(vector, blocks)
+    #vector = np.tile(vector, 5)[:-1]
+    #blocks = np.tile(blocks, 5)
+    #print(vector, blocks)
     
     
     # First, we need to find the indices of the '?'s
@@ -106,8 +84,8 @@ def count_valid_vectors2(vector, blocks):
     nmissing_ones = sum(blocks) - np.sum(vector == 1)
     nmissing_zeros = len(q_indices) - nmissing_ones
     
-    print(f"nmissing_ones: {nmissing_ones}")
-    print(f"nmissing_zeros: {nmissing_zeros}")
+    #print(f"nmissing_ones: {nmissing_ones}")
+    #print(f"nmissing_zeros: {nmissing_zeros}")
     # Generate all index combinations of length nmissing_ones. Then fill in the rest with zeros.
     one_indices = map(list, itertools.combinations(q_indices, nmissing_ones))
     n_valid = 0
@@ -117,150 +95,172 @@ def count_valid_vectors2(vector, blocks):
         if is_valid_vector(vector, blocks):
             n_valid += 1
     return n_valid
+    
 
-
-def get_ones_distribution(vector):
-    """ Get the distribution of ones in a vector, i.e. the lengths of the contiguous blocks of ones.
-    Example:
-    [1,1,0,1,-1,-1,0,1,1] -> [2,1,2]
-    """
-    blocks = []
+def create_tuples(vector):
+    tuples = []
     i = 0
     while i < len(vector):
         if vector[i] == 1:
             start_idx = i
             while i < len(vector) and vector[i] == 1:
                 i += 1
-            blocks.append(i - start_idx)
+            tuples.append([1, i - start_idx])
+        elif vector[i] == 0:
+            start_idx = i
+            while i < len(vector) and vector[i] == 0:
+                i += 1
+            tuples.append([0, i - start_idx])
         else:
-            i += 1
-    return blocks
-    
-    
+            start_idx = i
+            while i < len(vector) and vector[i] == -1:
+                i += 1
+            tuples.append([-1, i - start_idx])
+    return tuples
     
 
-def count_valid_vectors_fast(vector, blocks):
+def count_valid_vectors_fast(vector, blocks, tuples = None):
     """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
-    s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
-    """   
-    vector = np.array([SYM_TO_NUM[c] for c in vector + "?"])
-    # Copy the vector and blocks 4 times
-    vector = np.tile(vector, 5)[:-1]
-    blocks = np.tile(blocks, 5)
-    
-    print(vector, blocks)
-    
-    # First, we need to find the indices of the '?'s
-    # Naively, every '?' can be either a '.' or a '#'
-    # So, lets just try all combinations of '.' and '#'
-    # and check if the resulting vector is valid.
-    q_indices = np.where(vector == -1)[0]
-    
-    # We can reduce the number of free variables, by setting every -1 to be 0
-    # if setting it to 1 would make the vector invalid.
-    
-    # We know that we need to have sum(blocks) of ones, so we need to add atleast sum(blocks) - curr_num_ones
-    curr_num_ones = np.sum(vector == 1)
-    total_needed_num_ones = sum(blocks)
-    missing_ones = total_needed_num_ones - curr_num_ones
-    
-    # We then know that every other -1 must be 0
-    num_must_be_zero = len(q_indices) - missing_ones
-    
-    # We can find the number of valid combinations of 0s and 1s.
-    # Every missing values is eiter 0 or 1, so we can find valid combinations with a DFS
-    # 1) Make the first missing value 0 and see if the vector is valid so far
-    # 2) If it is valid, then put a 0 in the next missing value and see if the vector is valid so far, etc.
-    # 3) If when we put a 0, the vector is invalid, then we try 1 instead.
-    # 4) If it is still not valid, then we backtrack to the previous missing value and try 1 instead of 0.
-    # 5) If we have already tried 1 for the previous missing value, then we backtrack again, etc.
-    # 6) When we find a valid vector up to the last missing value, we increment the counter and start backtracking.
-    # 7) When we have tried 0 and 1 for the first entry, we are done.
-    
-    def reset_index(i):
-        have_tried_both_values_for_index[i] = False
-        current_value_for_index[i] = -1
-        vector[q_indices[i]] = -1
-        i -= 1
-        return i
-    
-    n_valid_solutions = 0
-    # A map, where the key is the index of the missing value, and the value is whther we have tried both 0 and 1 for that index
-    have_tried_both_values_for_index = {i : False for i in q_indices}
-    # A map, where the key is the index of the missing value, and the value is the current value of the missing value
-    current_value_for_index = {i : -1 for i in q_indices}
-    
-    curr_index = 0
-    
-    blocks_reached = 0
-    
-    while True:
-        
-        curr_index_in_q_indices = q_indices[curr_index]
+    and s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
+    In the next section I refer to 'tuples' but I mean lists of two elements.
 
-        # Check if we have tried both values for the first missing value
-        if have_tried_both_values_for_index[curr_index]:
-            # We have tried both values for the first missing value, so we are done
-            if curr_index == 0:
-                break
-            # We have tried both values for the current missing value, so we need to backtrac
-            # Reset
-            curr_index = reset_index(curr_index)
-            continue
-        
-        for val in range(current_value_for_index[curr_index_in_q_indices] + 1, 2):
-            # Try the next value for the current missing value
-            current_value_for_index[curr_index_in_q_indices] = val
-            vector[curr_index_in_q_indices] = val
-            
-            is_valid = is_valid_vector(vector[:curr_index_in_q_indices + 1], blocks[:blocks_reached + 1])
-            
-            if is_valid:
-                break
-            
-        if is_valid:
-            # We have found a valid vector up to the current missing value
-            if curr_index == len(q_indices) - 1:
-                # We have found a valid vector up to the last missing value
-                n_valid_solutions += 1
-                # Reset
-                curr_index = reset_index(curr_index)
-                continue
+    We do this by creating a list of tuples, where each tuple contains the symbol and the number of times it occurs.
+    We then take the first tuple, and count how many different ways we can fill it such that it has exactly blocks[0] '#'s.
+
+    If the first tuple symbol is '.', we can only fill it by setting all to values to '.' so 1 way.
+
+    If the first tuple symbol is '#', and the count == blocks[0] we can fill it 1 way, and we must reduce the count of the next tuple by 1,
+    otherwise there is no solution this path.
+
+    If the first tuple symbol is '?':
+        - If count >= blocks[0] AND the symbol of the next element is NOT '#'
+        we can fill the tuple in ncr(count, blocks[0]) ways.
+        - if count > blocks[0] AND the symbol of the next element IS '#'
+        we can fill the tuple in ncr(count-1, blocks[0]) ways.
+        - if count < blocks[0] we can only fill it by setting all to values to '.'
+    
+    This gives us the number of ways to fill in the first tuple.
+    We then obtain all the ways to fill the other tuples, and multiply all of them together.
+    """
+
+    # Create the list of lists (tuples)
+    if not isinstance(vector, np.ndarray):
+        vector = np.array([SYM_TO_NUM[c] for c in vector])# + "?"])
+        # Copy the vector and blocks 4 times
+        #vector = np.tile(vector, 5)[:-1]
+        #blocks = np.tile(blocks, 5)
+    
+    if tuples is None:
+        tuples = create_tuples(vector)
+    #print(f"Tuple list: {tuples}")
+    #else:
+    #    print(f"Recursively called with tuple: {tuples}")
+
+    nprod_other_sols = []
+    nprod = 1
+    for i, tup in enumerate(tuples):
+        #print(f"Tuple {i}: {tup}", end=" ")
+        #print(f"Blocks: {blocks}")
+        symbol, count = tup
+        # if the symbol is '#' we can only fill it one-way, and only if the count is equal to the number of blocks
+        if symbol == 1:
+            if count == blocks[0]:
+                nprod *= 1
+                blocks = blocks[1:]
+                # Reduce the count of the next tuple by 1
+                # if the count of the next tuple is 1, then we change the symbol to "." and set the count to 1
+                # Also only if we are not at the last tuple
+                if i < len(tuples) - 1:
+                    if tuples[i+1][1] == 1:
+                        # Change the symbol to '.'
+                        tuples[i+1][0] = 0
+                        tuples[i+1][1] = 1
+                    else:
+                        tuples[i+1][1] -= 1
             else:
-                # We have found a valid vector up to the current missing value, so we can move on to the next missing value
-                curr_index += 1
-                blocks_reached += 1
-                last_block_end = curr_index
-                continue
+                #print(f"Can be filled in zero ways")
+                return sum(nprod_other_sols)
+        # if the symbol is '.' we can only fill it one-way
+        elif symbol == 0:
+            nprod *= 1
+        # if the symbol is '?'
+        elif symbol == -1:
+            # If count > blocks[0] + blocks[1] we must consider,
+            # That we can use only this tuple to fill both blocks[0] and blocks[1]
+            # Lets split the tuple to three tuples:
+            # [-1, blocks[0]], [0,1], [-1, blocks[1]]
+            # and then call this function recursively
+            if len(blocks) > 1 and count > blocks[0] + blocks[1]:
+                print(f"Splitting tuple {tup} into {-1, blocks[0]}, [0,1], {-1, blocks[1]}")
+                new_tuples = tuples.copy()
+                # We can remove the current tuple, since we replace it with three new ones
+                new_tuples[0] = [-1, blocks[0]]
+                new_tuples.insert(1, [0,1])
+                new_tuples.insert(2, [-1, blocks[1]])
+                # Count the number of ways to fill the blocks,
+                # when the tuple is split this way
+                n_other_sols = count_valid_vectors_fast(vector, blocks, new_tuples)
+                # This n_other_sols is the number of different ways to fill the blocks from here on
+                # So to get the total number of ways to fill the blocks, we must multiply it with the number of ways to fill up to now
+                nprod_other_sols.append(n_other_sols * nprod)
+                
+            next_symbol = 0 if i == len(tuples) - 1 else tuples[i+1][0]
+            # If the count is greater than or equal to the number of blocks, we can fill it
+            # So all the different ways to have blocks[0] consecutive ones
+            if count >= blocks[0] and next_symbol != 1:
+                n = count_ways_to_select_k_consecutive_spots(count, blocks[0])
+                nprod *= n
+                print(f"tuple {tup} can be filled in {n} ways")
+                blocks = blocks[1:]
+            # If the count is greater than the number of blocks, we can fill it in ncr(count-1, blocks[0]) ways
+            elif count > blocks[0] and next_symbol == 1:
+                n = count_ways_to_select_k_consecutive_spots(count-1, blocks[0])
+                print(f"tuple {tup} can be filled in {n} ways")
+                blocks = blocks[1:]
+                nprod *= n
+            elif count < blocks[0] and next_symbol == 1:
+                # In the case that the next symbol is '#' and the count is less than the number of blocks,
+                # we can combine the two blocks into one by setting the last
+                # blocks[0] - next_count elements to 1 in this tuple
+                # We then need to also remove the next tuple
+                # We have 2 solutions
+                print(f"Combining tuple {tup} with next tuple {tuples[i+1]}")
+                nprod *= 2
 
-            
-            
-            
-            
-            
-        have_tried_both_values_for_index[curr_index] = True
-            
-        
-        
-    
-    
 
+            # If the count is less than the number of blocks and the next symbol is not '#'
+            # we can only fill it by setting all to values to '.'
+            else:
+                nprod *= 1
 
-    
+        #print(f"Can be filled in {nprod} ways")
+        #print(f"Blocks left: {blocks}")
+        if len(blocks) == 0:
+            #print(f"No more blocks left to fill")
+            break
+    if len(blocks) > 0:
+        #print(f"Could not fill all blocks")
+        return sum(nprod_other_sols)
+    return nprod + sum(nprod_other_sols)
+
+def count_ways_to_select_k_consecutive_spots(n, k):
+    if k > n or k <= 0:
+        return 0
+    if k == 1:
+        return n
+    return n - k + 1
+
 
 nvecs = 0
-for line in data_strings:
+for line in tqdm.tqdm(data_strings):
     line_split = line.split(" ")
     vector = line_split[0]
-    print(vector, end=" ")
     blocks = [int(x) for x in line_split[1].split(",")]
     
-    print(blocks, end=" ")
-    
-    n = count_valid_vectors2(vector, blocks)
-    
-    print(f"==> {n}")
-    
+    print(f"Line: {line}")
+    n = count_valid_vectors_fast(vector, blocks)
+    print(f"Vector {vector} has {n} valid vectors")
     nvecs += n
+
 print(nvecs)
     

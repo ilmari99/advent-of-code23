@@ -28,9 +28,8 @@ SYM_TO_NUM = {
 if not os.path.exists(input_file):
     with open(input_file, "w") as f:
         f.write(data)
-
-#with open(input_file, "r") as f:
-#    data = f.read()
+with open(input_file, "r") as f:
+    data = f.read()
         
 data_strings = data.split("\n")
 
@@ -117,7 +116,7 @@ def create_tuples(vector):
                 i += 1
             tuples.append([-1, i - start_idx])
     return tuples
-    
+
 
 def count_valid_vectors_fast(vector, blocks, tuples = None):
     """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
@@ -243,6 +242,70 @@ def count_valid_vectors_fast(vector, blocks, tuples = None):
         return sum(nprod_other_sols)
     return nprod + sum(nprod_other_sols)
 
+
+@functools.lru_cache(maxsize=None, typed=False)
+def count_valid_vectors_recursive(vector, blocks, current_blocks = tuple()):
+    """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
+    and s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
+    We do this recursively, by trying to substitute the first '?' with '.' and '#', and then recursively
+    calling this function with the new vector.
+
+    If a one is placed, we increment current_blocks[-1] by 1.
+    If a zero is placed, we append 0 to current_blocks.
+
+    The base cases are:
+    - 0 if any value in blocks is different from the corresponding value in current_blocks up to len(current_blocks) - 2
+    - 0 if len(current_blocks) > len(blocks)
+    - 1 if current_blocks == blocks
+    """
+    current_blocks = list(current_blocks)
+    #print(f"Vector: {vector}, current_blocks: {current_blocks}")
+
+    if len(vector) == 0:
+        curr_blocks_no_zeros = [b for b in current_blocks if b != 0]
+        if len(curr_blocks_no_zeros) == len(blocks) and all([b == c for b,c in zip(blocks, curr_blocks_no_zeros)]):
+            #print(f"Found solution with blocks: current_blocks: {current_blocks}")
+            return 1
+        return 0
+    
+    # If any value in blocks is different from the corresponding
+    # value in current_blocks excluding the last value
+    if len(current_blocks) > 0 and any([b != c for b,c in zip(blocks[:-1], current_blocks[:-1])]):
+        #print(f"Cannot find solution when current_blocks: {current_blocks} and blocks: {blocks}")  
+        #print(f"No solution for picked_values: {picked_values}")
+        return 0
+    
+    if not current_blocks:
+        current_blocks.append(0)
+    
+    number_of_sols = 0
+    possible_placements = [0, 1] if vector[0] == -1 else [vector[0]]
+    #print(f"Possible placements: {possible_placements}")
+    placed_zero = False
+    # Change the first '?' to '.' or '#'
+    for p in possible_placements:
+        # If we place a one, we need to increment the last block.
+        if p == 1:
+            current_blocks[-1] += 1
+        
+        # If we place a zero, we need to append a new block IF the last block is not zero
+        elif p == 0:
+            if current_blocks[-1] != 0:
+                placed_zero = True
+                current_blocks.append(0)
+
+        # Find the number of solutions for the new vector and current_blocks
+        number_of_sols += count_valid_vectors_recursive(vector[1:], blocks, tuple(current_blocks))
+
+        # If we placed a one, we need to decrement the last block.
+        if p == 1:
+            current_blocks[-1] -= 1
+        if p == 0 and placed_zero:
+            current_blocks.pop()
+            placed_zero = False
+    return number_of_sols
+
+
 def count_ways_to_select_k_consecutive_spots(n, k):
     if k > n or k <= 0:
         return 0
@@ -252,14 +315,25 @@ def count_ways_to_select_k_consecutive_spots(n, k):
 
 
 nvecs = 0
-for line in tqdm.tqdm(data_strings):
+for i,line in enumerate(tqdm.tqdm(data_strings)):
+    #if i != 1:
+    #    continue
     line_split = line.split(" ")
     vector = line_split[0]
+
+    vector = np.array([SYM_TO_NUM[c] for c in vector + "?"])
+
     blocks = [int(x) for x in line_split[1].split(",")]
+
+    vector = np.tile(vector, 5)[:-1]
+    blocks = np.tile(blocks, 5)
+
+    vector = tuple(vector)
+    blocks = tuple(blocks)
     
-    print(f"Line: {line}")
-    n = count_valid_vectors_fast(vector, blocks)
-    print(f"Vector {vector} has {n} valid vectors")
+    #print(f"Vector: {vector}", end=" ")
+    n = count_valid_vectors_recursive(vector, blocks)
+    #print(f"has {n} valid vectors")
     nvecs += n
 
 print(nvecs)

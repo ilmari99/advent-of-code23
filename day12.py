@@ -1,9 +1,9 @@
 import functools
 import itertools
-import aocd
+#import aocd
 import os
 import numpy as np
-import math
+import multiprocessing as mp
 import tqdm
 
 DAY = 12
@@ -28,6 +28,7 @@ SYM_TO_NUM = {
 if not os.path.exists(input_file):
     with open(input_file, "w") as f:
         f.write(data)
+
 with open(input_file, "r") as f:
     data = f.read()
         
@@ -243,7 +244,21 @@ def count_valid_vectors_fast(vector, blocks, tuples = None):
     return nprod + sum(nprod_other_sols)
 
 
-@functools.lru_cache(maxsize=None, typed=False)
+#@functools.cache
+def check_is_valid_block(current_blocks, blocks):
+    curr_blocks_no_zeros = [b for b in current_blocks if b != 0]
+    if len(curr_blocks_no_zeros) == len(blocks) and all((b == c for b,c in zip(blocks, curr_blocks_no_zeros))):
+        #print(f"Found solution with blocks: current_blocks: {current_blocks}")
+        return 1
+    return 0
+
+#@functools.cache
+def check_is_any_different(current_blocks, blocks):
+    return any([b != c for b,c in zip(blocks[:-1], current_blocks[:-1])])
+
+
+#@functools.lru_cache(maxsize=1024, typed=False)
+@functools.cache
 def count_valid_vectors_recursive(vector, blocks, current_blocks = tuple()):
     """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
     and s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
@@ -258,23 +273,21 @@ def count_valid_vectors_recursive(vector, blocks, current_blocks = tuple()):
     - 0 if len(current_blocks) > len(blocks)
     - 1 if current_blocks == blocks
     """
-    current_blocks = list(current_blocks)
     #print(f"Vector: {vector}, current_blocks: {current_blocks}")
-
+    
+    
     if len(vector) == 0:
-        curr_blocks_no_zeros = [b for b in current_blocks if b != 0]
-        if len(curr_blocks_no_zeros) == len(blocks) and all([b == c for b,c in zip(blocks, curr_blocks_no_zeros)]):
-            #print(f"Found solution with blocks: current_blocks: {current_blocks}")
-            return 1
-        return 0
+        return check_is_valid_block(current_blocks, blocks)
     
     # If any value in blocks is different from the corresponding
     # value in current_blocks excluding the last value
-    if len(current_blocks) > 0 and any([b != c for b,c in zip(blocks[:-1], current_blocks[:-1])]):
+    if len(current_blocks) > 0 and check_is_any_different(current_blocks, blocks):
         #print(f"Cannot find solution when current_blocks: {current_blocks} and blocks: {blocks}")  
         #print(f"No solution for picked_values: {picked_values}")
         return 0
     
+    
+    current_blocks = list(current_blocks)
     if not current_blocks:
         current_blocks.append(0)
     
@@ -302,8 +315,108 @@ def count_valid_vectors_recursive(vector, blocks, current_blocks = tuple()):
             current_blocks[-1] -= 1
         if p == 0 and placed_zero:
             current_blocks.pop()
-            placed_zero = False
+            #placed_zero = False
     return number_of_sols
+
+@functools.cache
+def count_valid_vectors_recursive2(vector, blocks, curr_seq_len = 0):
+    """ Count the number of valid vectors that can be formed by filling in the "?" with "." or "#",
+    and s.t. 'blocks' denotes all the contingent '#' blocks in the vector.
+    We do this recursively, by trying to substitute the first '?' with '.' and '#', reducing the blocks,
+    and then recursively calling this function with the new vector and blocks.
+    After trying a value, we restore the blocks to their original value.
+
+    If a one is placed, we decrease current_blocks[0] by 1. If current_blocks[0] == 0, we pop it.
+    If a zero is placed, we do not change current_blocks.
+
+    The base cases are:
+    - 0 sum(blocks) > np.sum(vector == -1) + np.sum(vector == 1)
+    - 1 if len(vector) == 0 and len(blocks) == 0
+    - 0 if len(vector) == 0 and len(blocks) != 0
+    """
+    #print(f"Vector: {vector}, blocks: {blocks}, curr_seq_len: {curr_seq_len}")
+    #print(f"Current sequence length: {curr_seq_len}, chosen values: {chosen_values}")
+    #print()
+    
+    # vector_is_empty is True if we only have 0s in the vector
+    vector_is_empty = len(vector) == 0# or sum(np.abs(vector)) == 0
+    vector_has_nzeros = np.sum(vector == 0)
+    vector_only_has_zeros = len(vector) == vector_has_nzeros
+    vector_has_nzeros_and_minus_ones = np.sum(vector == 0) + np.sum(vector == -1)
+    vector_only_has_zeros_or_minus_ones = len(vector) == vector_has_nzeros_and_minus_ones
+    #print(f"vector_is_empty: {vector_is_empty}, vector_only_has_zeros: {vector_only_has_zeros}, vector_only_has_zeros_or_minus_ones: {vector_only_has_zeros_or_minus_ones}")
+    
+    # If the vector has length 0
+    if vector_is_empty:
+        # We have a solution if we have no more blocks to fill, and the current sequence length is 0
+        if len(blocks) == 0 and curr_seq_len == 0:
+            #print(f"Found solution because vector is empty and blocks is empty and curr_seq_len is 0")
+            return 1
+        # We have only have one block left, and the current sequence length is equal to the block
+        if len(blocks) == 1 and curr_seq_len == blocks[0]:
+            #print(f"Found solution because vector is empty and blocks is 1 and curr_seq_len is blocks[0]")
+            return 1
+        return 0
+    
+    if len(blocks) > 0 and curr_seq_len > blocks[0]:
+        return 0
+    if len(blocks) == 0 and curr_seq_len > 0:
+        return 0
+
+    
+    #print(f"Looking at vector: {vector}, blocks: {blocks}, curr_seq_len: {curr_seq_len}")#, chosen_values: {chosen_values}")
+
+    number_of_sols = 0
+    
+    possible_placements = [0, 1] if vector[0] == -1 else [vector[0]]
+    
+    blocks = list(blocks)
+    popped_zero = False
+    # Change the first '?' to '.' or '#'
+    for p in possible_placements:
+        block_copy = blocks.copy()
+        curr_seq_len_copy = curr_seq_len
+        # If we place a one, we increase the sequence length which we will use when placing a zero
+        if p == 1:
+            curr_seq_len += 1
+        
+        # If we place a zero, we let the curr_seq_len do its work;
+        # decrease the next block by curr_seq_len
+        # If the block becomes < 0, we can not place a zero or a one here so return n_sols
+        # If the block becomes 0, we can remove it
+        elif p == 0 and len(blocks) > 0:
+            if curr_seq_len != 0 and blocks[0] != curr_seq_len:
+                #print(f"Cannot find solution when curr_seq_len: {curr_seq_len} and blocks: {blocks}")
+                assert blocks == block_copy, f"Blocks changed from {block_copy} to {blocks}"
+                assert curr_seq_len == curr_seq_len_copy, f"curr_seq_len changed from {curr_seq_len_copy} to {curr_seq_len}"
+                continue
+                #return number_of_sols
+            blocks[0] -= curr_seq_len
+            curr_seq_len_temp = curr_seq_len
+            curr_seq_len = 0
+            if blocks[0] == 0:
+                popped_zero = True
+                blocks.pop(0)
+                
+                
+        # Find the number of solutions for the new vector and current_blocks
+        number_of_sols += count_valid_vectors_recursive2(vector[1:], tuple(blocks), curr_seq_len)#, chosen_values + [p])
+        
+        # If we placed a zero, we need to restore the blocks and the sequence length
+        if p == 0:
+            if popped_zero:
+                blocks.insert(0, 0)
+                popped_zero = False
+            if len(blocks) > 0:
+                curr_seq_len = curr_seq_len_temp
+                blocks[0] += curr_seq_len
+        # If we placed a one, we merely need to restore the sequence length
+        elif p == 1:
+            curr_seq_len -= 1
+        assert blocks == block_copy, f"Blocks changed from {block_copy} to {blocks}"
+        assert curr_seq_len == curr_seq_len_copy, f"curr_seq_len changed from {curr_seq_len_copy} to {curr_seq_len}"
+    return number_of_sols
+
 
 
 def count_ways_to_select_k_consecutive_spots(n, k):
@@ -313,28 +426,84 @@ def count_ways_to_select_k_consecutive_spots(n, k):
         return n
     return n - k + 1
 
-
-nvecs = 0
-for i,line in enumerate(tqdm.tqdm(data_strings)):
+sum_ = 0
+for i, line in enumerate(data_strings):
     #if i != 1:
     #    continue
     line_split = line.split(" ")
     vector = line_split[0]
-
-    vector = np.array([SYM_TO_NUM[c] for c in vector + "?"])
-
+    vector = np.array([SYM_TO_NUM[c] for c in vector])# + "?"])
     blocks = [int(x) for x in line_split[1].split(",")]
-
-    vector = np.tile(vector, 5)[:-1]
-    blocks = np.tile(blocks, 5)
 
     vector = tuple(vector)
     blocks = tuple(blocks)
     
-    #print(f"Vector: {vector}", end=" ")
-    n = count_valid_vectors_recursive(vector, blocks)
-    #print(f"has {n} valid vectors")
-    nvecs += n
+    print(f"Vector: {vector}, blocks: {blocks}")
+    n = count_valid_vectors_recursive2(vector, blocks)
+    print(f"has {n} valid vectors")
+    sum_ += n
+print(f"Total number of valid vectors: {sum_}")
 
-print(nvecs)
+#exit()
+
+nseqs = 20
+nlines = len(data_strings)
+seq_len = nlines // nseqs
+
+# Split the data into nseqs, and then process each sequence in parallel
+data_pieces = [data_strings[i*seq_len:(i+1)*seq_len] for i in range(nseqs)]
+
+def process_data(data_piece):
+    data_strings, sequence_id = data_piece
+    nvecs = 0
+    len_data = len(data_strings)
+    for i,line in enumerate(data_strings):
+        line_split = line.split(" ")
+        vector = line_split[0]
+        
+        if i % 10 == 0:
+            print(f"Line {i}/{len_data}")
+
+        vector = np.array([SYM_TO_NUM[c] for c in vector + "?"])
+
+        blocks = [int(x) for x in line_split[1].split(",")]
+
+        vector = np.tile(vector, 5)[:-1]
+        blocks = np.tile(blocks, 5)
+        
+        # From the vector, we can reduce the number of 0s drastically, by combining consecutive 0s into one
+        vector = create_tuples(vector)
+        vec = []
+        for tup in vector:
+            if tup[0] == 0:
+                vec.append(0)
+            else:
+                vec += [tup[0]] * tup[1]
+                
+        vector = vec
+        vector = tuple(vector)
+        blocks = tuple(blocks)
+        
+        #print(f"Vector: {vector}", end=" ")
+        n = count_valid_vectors_recursive2(vector, blocks)
+        #print(f"has {n} valid vectors")
+        nvecs += n
+    print(f"Found {nvecs} valid vectors in sequence {sequence_id}")
+    return nvecs
+print(f"{[len(d) for d in data_pieces]}")
+# Add the sequence id to the data_pieces
+data_pieces = [(d, i) for i,d in enumerate(data_pieces)]
+
+
+
+with mp.Pool(processes=10) as pool:
+    # Save the result of each process in a list. The results are in order of finishing.
+    results = pool.imap_unordered(process_data, data_pieces)
+    # Sum the results
+    total = sum(results)
+    print(f"Total number of valid vectors: {total}")
+    
+    
+    
+    
     
